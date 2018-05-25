@@ -6,12 +6,12 @@
 ## 开始
 ```
 git clone https://github.com/Eric-Cool/LiteChat.git
+cd LiteChat
 npm install
 ```
 
 ## 运行
 ```
-cd LiteChat
 node .\bin\www
 ```
 
