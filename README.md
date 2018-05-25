@@ -9,6 +9,7 @@ git clone https://github.com/Eric-Cool/LiteChat.git
 cd LiteChat
 npm install
 ```
+连接MongoDB
 
 ## 运行
 ```
