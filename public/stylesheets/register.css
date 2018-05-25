@@ -1,0 +1,64 @@
+* {
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  width: 100%;
+  /*height: 100%;*/
+  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+
+body {
+  background-color: #242C33;
+  color: #4FAFB8;
+}
+
+#index_page {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -o-user-select: none;
+  cursor: default;
+}
+
+
+h1 {
+  text-align: center;
+  padding-top: 100px;
+  font-size: 35px;
+}
+
+p {
+  text-align: center;
+  font-size: 18px;
+}
+
+fieldset {
+  margin: 50px auto;
+  max-width: 300px;
+  width: 100%;
+}
+
+fieldset label {
+  color: #8CC7CC;
+}
+
+.pw-tips {
+  margin: 5px 3px 0;
+  color: #E74C3C;
+  display: none;
+}
+
+.btn {
+  background-color: #4EB1BA;
+  color: #FFFFFF;
+  margin: 30px 0 5px;
+}
+
+.btn:hover,
+.btn:focus,
+.btn:active {
+  color: #FFFFFF;
+}

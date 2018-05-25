@@ -1,0 +1,374 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('me:server');
+var http = require('http');
+
+
+var routes = require('../routes/index');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '8084');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port, '0.0.0.0');
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+// 连接数据库
+var monk = require('monk');
+var db = monk('localhost:27017/Users');
+
+//  socket.io module
+
+/* socket部分 - BEGIN */
+
+// 创建socket.io对象
+var io = require('socket.io').listen(server);
+// 载入文件读写模块
+var fs = require('fs');
+// 在线用户数据
+var online = {
+  number: 0,
+  users: []
+};
+// socket连接id
+var socketId = [];
+// var timeoutFlag = {};
+
+// socket连接
+io.sockets.on('connection', function(socket) {
+  var message = '';
+  var name = '';
+  var type = 'real-time';
+  // 获取数据库用户列表子集
+  var db_userdata = db.get("userdata");
+  // 获取数据库聊天内容子集
+  var db_message = db.get("message");
+  // 获取数据库公告内容子集
+  var db_notice = db.get("notice");
+  // 用户进入
+  socket.on('update', function(obj) {
+    // 判断用户是否已存在在线用户列表内
+    if (!online.users.some(function(item, index, array) {
+        return online.users[index] == obj
+      })) {
+      // 获取用户名
+      name = obj;
+      // 将新用户添加到在线用户列表
+      online.users.push(obj);
+      // 更新在线用户数
+      online.number = online.users.length;
+      // 获取用户IP地址
+      clientIp = socket.handshake.address;
+      // 分配用户socketId
+      socketId[name] = socket.id;
+      // 向新用户显示公告
+      showNotice(socket);
+      // 为新用户载入历史聊天记录
+      loadHtMsg(socket);
+      // 服务端显示
+      console.log(name + "进入了聊天室");
+    }
+    var banList = [];
+    db_userdata.find({"ban": 1}, function(err, docs) {
+      docs.forEach(function(item, index) {
+        banList[index] = item.username;
+      });
+      // 向所有客户端发送在线用户信息
+      io.emit('update', online, banList, clientIp);
+    });
+    // 服务端显示
+    console.log('总人数为:' + online.number + '，人员名单为' + online.users);
+  })
+
+  // 监听用户发布聊天内容
+  socket.on('message', function(obj) {
+    // 获取服务器当前时间，生成时间戳
+    var timestamp = getTimestamp();
+    // 获取用户IP地址
+    clientIp = socket.handshake.address;
+    // 向所有客户端广播发布的消息
+    io.emit('message', obj, timestamp, type, clientIp);
+    // 服务端显示
+    console.log("[" + timestamp + "] " + obj.username + '说：' + obj.message)
+    // 信息存入数据库
+    db_message.insert({
+      "time": timestamp,
+      "name": obj.username,
+      "message": obj.message
+    });
+  })
+
+  // 图片传输
+  socket.on('img', function(obj) {
+    // 获取服务器当前时间，生成时间戳
+    var timestamp = getTimestamp();
+    // 向其他用户发送图片内容
+    socket.broadcast.emit('img', obj, timestamp);
+    // 服务端控制台显示
+    console.log("[" + timestamp + "] " + obj.username + "发送了一张图片");
+    // 信息存入数据库
+    db_message.insert({
+      "time": timestamp,
+      "name": obj.username,
+      "message": "[图片]"
+    });
+  })
+
+  // 用户私聊
+  socket.on('private message', function(obj) {
+    // 获取服务器当前时间，生成时间戳
+    var timestamp = getTimestamp();
+    // 向指定用户发送消息
+    socket.to(socketId[obj.to]).emit('private message', obj, timestamp);
+    // 服务端控制台显示
+    console.log("[" + timestamp + "] " + obj.from + "对" + obj.to + "说：" + obj.msg);
+  })
+
+  // 管理员封禁指令
+  socket.on('ban', function(name) {
+    var r = {
+      info: '',
+      type: ''
+    };
+    //将目标用户从用户列表中移除
+    if (online.users.some(function(item, index, array) {
+        return online.users[index] == name;
+      })) {
+      online.number = online.number - 1;
+      var index = online.users.indexOf(name);
+      online.users.splice(index, 1);
+      console.log(name + "退出了聊天室");
+      var banList = [];
+      db_userdata.find({"ban": 1}, function(err, docs) {
+        docs.forEach(function(item, index) {
+          banList[index] = item.username;
+        });
+        // 向所有客户端发送在线用户信息
+        io.emit('update', online, banList);
+      });
+    }
+    // 执行数据库修改操作
+    db_userdata.update({'username': name}, {$set:{'ban': 1}}, function(err, doc) {
+      // 操作完成
+      if (err == null) {
+        // 向目标用户发送封禁指令
+        socket.to(socketId[name]).emit('ban');
+        // 将执行结果返回给操作者
+        r.info = '用户 ' + name + ' 已被封禁';
+        r.type = 'success';
+        socket.emit('ban completed', r.info, r.type);
+      } else {
+        // 将执行结果返回给操作者
+        r.info = '操作失败';
+        r.type = 'error';
+        socket.emit('ban completed', r.info, r.type);
+      }
+    });
+  })
+
+  // 管理员解禁指令
+  socket.on('freed', function(name) {
+    var r = {
+      info: '',
+      type: ''
+    };
+    // 执行数据库修改操作
+    db_userdata.update({'username': name}, {$set:{'ban': 0}}, function(err, doc) {
+      // 操作完成
+      if (err == null) {
+        // 向目标用户发送封禁指令
+        socket.to(socketId[name]).emit('ban');
+        // 将执行结果返回给操作者
+        r.info = '用户 ' + name + ' 已解除封禁';
+        r.type = 'success';
+        socket.emit('freed completed', r.info, r.type);
+      } else {
+        // 将执行结果返回给操作者
+        r.info = '操作失败';
+        r.type = 'error';
+        socket.emit('freed completed', r.info, r.type);
+      }
+    });
+  })
+
+  // 管理员发布公告
+  socket.on('show notice', function(content) {
+    // 获取服务器当前时间，生成时间戳
+    var timestamp = getTimestamp();
+    // 公告内容
+    var noticeContent = content;
+    // 向所有用户发送公告内容
+    if (noticeContent != '') {
+      io.emit('show notice', timestamp, noticeContent);
+    }
+    // 服务端显示
+    console.log("[" + timestamp + "] " + "管理员发布公告：" + noticeContent);
+    // 公告内容存入数据库
+    db_notice.insert({
+      "time": timestamp,
+      "content": noticeContent
+    });
+  })
+
+  // 用户退出聊天室时
+  socket.on('disconnect', function() {
+    if (online.users.some(function(item, index, array) {
+        return online.users[index] == name;
+      })) {
+      online.number = online.number - 1;
+      var index = online.users.indexOf(name);
+      online.users.splice(index, 1);
+
+      console.log(name + "退出了聊天室");
+
+      var banList = [];
+      db_userdata.find({"ban": 1}, function(err, docs) {
+        docs.forEach(function(item, index) {
+          banList[index] = item.username;
+        });
+        // 向所有客户端发送在线用户信息
+        io.emit('update', online, banList);
+      });
+
+      // 刷新地图上的坐标
+      io.emit('refresh position');
+    }
+  });
+
+  //mapchat 地图接口
+  socket.on('new position', function(username, point_lng, point_lat) {
+    io.emit('add position', username, point_lng, point_lat);
+  });
+});
+
+// 向新用户显示公告
+function showNotice(socket) {
+  // 获取数据库公告内容子集
+  var db_notice = db.get("notice");
+  // 获取最近一条公告内容
+  db_notice.find({}, {limit:1, sort:{_id:-1}}, function(err, docs) {
+    // 向新用户发送公告内容
+    docs.forEach(function(item) {
+      if (item.content != '') {
+        socket.emit('show notice', item.time, item.content);
+      }
+    });
+  });
+}
+
+// 新用户加载历史聊天记录
+function loadHtMsg(socket) {
+  var type = 'history';
+  var obj = {
+    name : "",
+    message : ""
+  };
+  // 从数据库获取历史聊天内容
+  var db_message = db.get("message");
+  db_message.find({}, function(err, docs) {
+    if (docs != '') {
+      docs.forEach(function(item) {
+        obj.username = item.name;
+        obj.message = item.message;
+        // 向新用户发送历史聊天内容
+        socket.emit('message', obj, item.time, type);
+      });
+    }
+  });
+}
+
+// 获取时间戳
+function getTimestamp() {
+  // 获取当前时间
+  var t = new Date();
+  // 构建时间戳
+  var timestamp = checkTime(t.getHours()) + ":" + checkTime(t.getMinutes()) + ":" + checkTime(t.getSeconds());
+  // 补齐时间格式
+  function checkTime(i) {
+    if (i < 10)
+      i = "0" + i;
+    return i;
+  }
+  return timestamp;
+}
+
+/* socket部分 - END */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string' ?
+    'Pipe ' + port :
+    'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string' ?
+    'pipe ' + addr :
+    'port ' + addr.port;
+  debug('Listening on ' + bind);
+}

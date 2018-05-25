@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Lit Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0">
+  <link rel="Shortcut Icon" href=/favicon.ico>
+  <meta name="applicable-device" content="pc,mobile">
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <script src="/javascripts/jquery-1.12.0.min.js"></script>
+  <link rel='stylesheet' href='/bootstrap-3.3.7-dist/css/bootstrap.css' />
+  <link rel='stylesheet' href='/pnotify/pnotify.custom.min.css' />
+  <link rel='stylesheet' href='/stylesheets/font-awesome.min.css' />
+  <link rel='stylesheet' href='/stylesheets/chatroom.css' />
+</head>
+
+<body>
+  <div class="chat-container">
+    <div class="userList users-menu">
+      <!-- <img  class="openMenuImg" src="images/menu.png" alt="menu" /> -->
+      <!-- <div class="exitChatRoom openMenuDiv">在线人员</div> -->
+      <div class="menu-header">
+        <span>在线人员</span>
+      </div>
+      <ul class="online_users openMenuUl">
+        <li style="text-align: center"><a style="float: none" href='/'><span class="icon-signout"></span> 退出</a></li>
+      </ul>
+    </div>
+    <div class="chat-content">
+      <div class="chat_header" id="header">
+        <a data-target="#" class="sidebar-toggle" data-toggle="users-menu" role="button">
+          <span class="icon-reorder"></span>
+        </a>
+        <div class="setting dropdown">
+          <a id="dLabel" data-target="#" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+            <span class="icon-cog"></span>
+          </a>
+          <ul id="settingMenu" class="dropdown-menu" aria-labelledby="dLabel">
+            <li><a id="recive-pv-msg" class="switch-on"><span class="icon-ok"></span> 接收私聊</a></li>
+            <li><a id="show-timestamp" class="switch-on"><span class="icon-ok"></span> 显示时间戳</a></li>
+            <li><a id="show-user-dvm" class="switch-on"><span class="icon-ok"></span> 用户动态提示</a></li>
+            <li><a id="show-ip" class="switch-off"><span class="icon-ok"></span> 显示IP</a></li>
+            <li><a id="map-chat-mode" class="switch-off"><span class="icon-ok"></span> 地域聊天模式</a></li>
+          </ul>
+        </div>
+        <p>Lit Chat</p>
+        <div class="online_number">在线: <span></span>人</div>
+      </div>
+      <div class="chat_window ip-hidden">
+      </div>
+      <div class="MapChat_window" id="mapChat">
+      </div>
+      <div class="MapChat_msg">
+      </div>
+      <div class="input_text">
+        <div class="emoji">
+          <div class="emoji_package">
+            <span>😀</span>
+            <span>😂</span>
+            <span>😃</span>
+            <span>😄</span>
+            <span>😅</span>
+            <span>😉</span>
+            <span>😊</span>
+            <span>😋</span>
+            <span>😎</span>
+            <span>😍</span>
+            <span>😘</span>
+            <span>😗</span>
+            <span>😑</span>
+            <span>😜</span>
+            <span>😒</span>
+            <span>😒</span>
+            <span>😕</span>
+            <span>😤</span>
+            <span>😠</span>
+            <span>😇</span>
+            <span>😷</span>
+            <span>😢</span>
+            <span>😰</span>
+            <span>😨</span>
+            <span>😦</span>
+            <span>😬</span>
+          </div>
+        </div>
+        <textarea id="message"></textarea>
+        <div href="javascript:;" id="sendImg">
+          <input type="file" value="Image" accept="image/png,image/gif,image/jpeg" name="file">
+          <span class="icon-picture"></span>
+        </div>
+        <a id="addEmoji" data-target="#" role="button"><img src="/images/emoji.png"></a>
+        <button class="btn btn-success" id="sendMsg">发送消息</button>
+      </div>
+    </div>
+  </div>
+</body>
+<script src="/bootstrap-3.3.7-dist/js/bootstrap.js"></script>
+<script src="/javascripts/socket.io.js"></script>
+<script src="/pnotify/pnotify.custom.min.js"></script>
+<script type="text/javascript" src="http://api.map.baidu.com/api?v=2.0&ak=YnGapgnXc9tNZ8O2huRxTay3hpGGhyFL"></script>
+<script>
+// 调整界面布局
+$(window).on("load resize", function(){
+  var users_menu_h = $(window).height() - 75;
+  var chat_window_h = $(window).height() - $('.chat_header').height() - $('.input_text').height();
+  $(".online_users").css("height", users_menu_h);
+  $(".chat_window").css("height", chat_window_h);
+  $(".MapChat_window").css("height", chat_window_h);
+});
+
+// 获取用户标识
+const username = '<%= username %>';
+const admin = <%= admin %>;
+const ban = <%= ban %>;
+// 创建socket连接
+var socket = io.connect('http://192.168.0.102:8084/');
+var user_list = '';
+var online = {
+  number: 0,
+  users: []
+};
+var banList = [];
+var LastMsgTime = '';
+var noticeContent = '';
+
+// 向服务器更新在线用户
+$(function() {
+  socket.emit('update', username);
+});
+
+// 发送群聊消息
+var sendMsg = function() {
+  var content = $('#message').val();
+  if (content != '') {
+    var obj = {
+      username: username,
+      message: content
+    };
+    // 发送消息到服务端
+    socket.emit('message', obj);
+    $('#message').val('');
+  }
+};
+
+// 接受更新消息
+socket.on('message', function(obj, timestamp, type, clientIp) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 定义正则匹配转义字符
+  var regLt = /\</gi;
+  var regEnter = /\n/gi;
+  var regSpace = /\s/g;
+  //历史聊天内容不显示IP
+  if (type == "history") {
+    clientIp = '';
+  }
+
+  // 将聊天内容中的部分字符进行转义
+  obj.message = obj.message.replace(regLt, '&lt;').replace(regEnter, "<br>").replace(regSpace, "&nbsp;&nbsp;");
+  // 插入当前时间
+  if (timestamp != LastMsgTime) {
+    $('.chat_window').append('<div class="chat_timestamp"><span>' + timestamp + '</span></div>');
+    LastMsgTime = timestamp;
+  }
+  // 插入聊天信息
+  if (obj.username == username) {
+    // 本人信息样式
+    $('.chat_window').append("<section class='my_chat'><div class='my_name'>" + obj.username + "</div><span class='my_msg'>" + obj.message + "</span><i class='user-my-ip'>" + clientIp + "</i></section>");
+    //地域聊天框
+    $('.MapChat_msg').append("<p>[" + timestamp + "] " + obj.username + ": " + obj.message + "</p>");
+  } else {
+    // 他人信息样式
+    $('.chat_window').append("<section class='all_chat'><div class='all_name'>" + obj.username + "</div><span class='all_msg'>" + obj.message + "</span><i class='user-all-ip'>" + clientIp + "</i></section>");
+    //地域聊天框
+    $('.MapChat_msg').append("<p>[" + timestamp + "] " + obj.username + ": " + obj.message + "</p>");
+  }
+  // 如果聊天信息为历史消息，告知用户
+  if (type == 'history') {
+    // 使提示信息保持在历史聊天内容的底端
+    $('.chat_notice').remove();
+    $('.chat_newUser').remove();
+    $('.chat_window').append('<div class="chat_notice"><span>———— 以上为最近聊天内容 ————</span></div>');
+    $('.chat_window').append('<div class="chat_newUser"><span>' + username + '进入聊天室</span></div>');
+  }
+  // 聊天框滚动置底
+  $('.chat_window').scrollTop($('.chat_window').scrollTop() + 9999);
+  $('.MapChat_msg').scrollTop($('.chat_window').scrollTop() + 9999);
+});
+
+// 获得在线人数与在线名单
+socket.on('update', function(obj, banList, clientIp) {
+  var newUser = obj.users[obj.users.length - 1];
+  // 若有新成员加入且此人非用户本人
+  if (online.number < obj.number && newUser != username) {
+    // 聊天框输入进入提示
+    $('.chat_window').append('<div class="chat_newUser"><span>' + newUser + ' 进入聊天室</span></div>');
+    // tmp code
+    socket.emit("new position", username, p.lng, p.lat);
+  } else if (online.number > obj.number) {
+    for (var i = 0; i < online.number; i++) {
+      if (online.users[i] !== obj.users[i]) {
+        // 聊天框输入退出提示
+        $('.chat_window').append('<div class="chat_newUser"><span>' + online.users[i] + ' 退出聊天室</span></div>');
+        break;
+      }
+    }
+  }
+  // 聊天框滚动置底
+  $('.chat_window').scrollTop($('.chat_window').scrollTop() + 9999);
+
+  // 参数更新
+  online.number = obj.number;
+  online.users = obj.users;
+  // 更新在线人数
+  $('.online_number>span').text(online.number);
+  // 更新在线用户列表
+  for (var i = 0; i < online.number; i++) {
+    // 构建用户列表
+    user_list += '<li><span class="icon-circle"></span> ' + online.users[i];
+    // 加载与其他用户的交互按钮
+    if (online.users[i] != username) {
+      // 加载管理员权限按钮
+      if (admin) {
+        // 加载封禁按钮
+        user_list += ' <a href="#" name="' + online.users[i] + '" onclick="banUser(this.name, this)"> <span class="icon-ban-circle"></span></a>';
+      }
+      // 加载私聊按钮
+      user_list += ' <a href="#" name="' + online.users[i] + '" onclick="sendPvMsg(this.name)"> <span class="icon-comment"></span></a>';
+    }
+    user_list += '</li>';
+  }
+  // 获取被封禁用户列表
+  if (admin && banList) {
+    for (var i = 0; i < banList.length; i++) {
+      // 构建被禁用户列表
+      user_list += '<li class="banList"><span class="icon-circle"></span> ' + banList[i] + ' <a href="#" name="' + banList[i] + '" onclick="freed(this.name)"><span class="icon-reply"></span></a></li>';
+    }
+  }
+  // 清空旧用户列表
+  $('.online_users li:not(:last-child)').remove();
+  // 重新插入用户列表
+  $('.online_users').prepend(user_list);
+  // 清空列表函数
+  user_list = '';
+})
+
+// 接收私聊信息
+socket.on('private message', function(obj, timestamp) {
+  if ($('#recive-pv-msg').hasClass('switch-on')) {
+    // 简化时间戳
+    var timestamp = getTimestamp(timestamp);
+    // 显示私聊内容
+    showPvMsg(timestamp, obj.from, obj.msg);
+  }
+})
+
+
+// 点击发送或按回车键发送消息
+$('button').click(sendMsg);
+$('#message').keydown(function(event) {
+  if (event.keyCode == 13 && event.ctrlKey) {
+    // 若按“Ctrl+回车”则换行
+    $('#message').val($('#message').val() + "\n");
+  } else if (event.keyCode == 13) {
+    // 若按“回车”则发送
+    event.preventDefault(); // 阻止按钮的默认交互行为
+    sendMsg();
+  }
+});
+
+// 用户列表菜单
+$('.userList>img').click(function() {
+  if ($(this).hasClass('openMenuImg')) {
+    // 若展开状态，执行关闭
+    $(this).removeClass('openMenuImg');
+    $('.exitChatRoom').removeClass('openMenuDiv');
+    $('.online_users').removeClass('openMenuUl');
+  } else {
+    // 若关闭状态，执行展开
+    $(this).addClass('openMenuImg');
+    $('.exitChatRoom').addClass('openMenuDiv');
+    $('.online_users').addClass('openMenuUl');
+  }
+})
+
+// 打开关闭表情框
+$('#addEmoji').click(function(event) {
+  // 切换表情框展开关闭
+  $('.emoji').toggleClass('emoji_active');
+})
+
+// 发送表情
+$('.emoji').click(function(event) {
+  if ($(event.target).is('span')) {
+    // 表情插入聊天内容
+    $('#message').val($('#message').val() + $(event.target).text());
+    // 切换表情框展开关闭
+    $('.emoji').toggleClass('emoji_active');
+  }
+})
+
+// 发送图片
+$("#sendImg").on("change", "input[type='file']", function() {
+  if (this.files.length != 0) {
+    var file = this.files[0],
+      reader = new FileReader(); // 载入文件读取器
+    if (!reader) {
+      alert("不支持发送图片!");
+      return;
+    };
+    reader.onload = function(e) {
+      // 将自己发送的图片加载到信息框中
+      $('.chat_window').append("<section class='my_chat'><div class='my_name'>" + username + "</div><span class='my_msg'><img src='" + e.target.result + "' /></span></section>");
+      // 信息框滚动置底
+      $('.chat_window').scrollTop($('.chat_window').scrollTop() + 99999);
+      // 发送图片数据
+      socket.emit('img', { "username": username, "image": e.target.result });
+    };
+    reader.readAsDataURL(file);
+  };
+});
+
+// 图片接收
+socket.on('img', function(obj, timestamp) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 插入当前时间
+  if (timestamp != LastMsgTime) {
+    $('.chat_window').append('<div class="chat_timestamp"><span>' + timestamp + '</span></div>');
+    LastMsgTime = timestamp;
+  }
+  // 插入图片至信息框
+  $('.chat_window').append("<section class='all_chat'><div class='all_name'>" + obj.username + "</div><span class='all_msg'><img src='" + obj.image + "' /></span></section>");
+  // 信息框滚动置底
+  $('.chat_window').scrollTop($('.chat_window').scrollTop() + 99999);
+});
+
+// 显示公告
+socket.on('show notice', function(timestamp, content) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 显示私聊内容
+  showNotice(timestamp, content);
+})
+
+// 接收私聊信息
+socket.on('showNotice', function(timestamp, content) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 显示私聊内容
+  showPvMsg(timestamp, obj.from, obj.msg);
+})
+
+// 用户被封禁
+socket.on('ban', function(obj) {
+  // alert('已被管理员请离房间！');
+  // 返回到登录页面
+  window.location.reload();
+});
+
+// 封禁指令结果
+socket.on('ban completed', function(result) {
+  showResult(result);
+  socket.emit('update', username);
+})
+
+// 解除封禁指令结果
+socket.on('freed completed', function(result) {
+  showResult(result);
+  socket.emit('update', username);
+})
+
+// 管理员封禁
+var banUser = function(name, thisEle) {
+  if (admin) {
+    socket.emit('ban', name);
+    // console.log(thisEle.parentNode);
+    // $(thisEle).parent().remove();
+  } else {
+    alert("权限不足，操作失败");
+  }
+}
+
+// 管理员解禁
+var freed = function(name) {
+  if (admin) {
+    banList = [];
+    socket.emit('freed', name);
+  } else {
+    alert("权限不足，操作失败");
+  }
+}
+
+// 加载管理员按钮
+$(function() {
+  if (admin) {
+    $('#settingMenu').append('<li class="divider"></li><li><a id="notice" onclick="sendNotice()"><span class="icon-edit"></span> 发布公告</a></li>');
+  }
+});
+
+// 发送公告
+var sendNotice = function() {
+  // 公告内容
+  new PNotify({
+    title: '发布公告',
+    text: '输入公告内容',
+    icon: 'glyphicon glyphicon-edit',
+    hide: false,
+    confirm: {
+      prompt: true,
+      prompt_multi_line: true,
+      prompt_default: noticeContent
+    },
+    buttons: {
+      closer: false,
+      sticker: false
+    },
+    history: {
+      history: false
+    },
+    addclass: 'stack-modal',
+    stack: {
+      'dir1': 'down',
+      'dir2': 'right',
+      'modal': true
+    },
+    mobile: {
+      styling: false
+    }
+  }).get().on('pnotify.confirm', function(e, notice, val) {
+    // 发送公告内容到服务端
+    socket.emit('show notice', val);
+  });
+};
+
+// 发送私聊消息
+var sendPvMsg = function(name) {
+  // 私信数据
+  var obj = {
+    to: name,
+    msg: "",
+    from: username
+  };
+  new PNotify({
+    title: '发送给 ' + name,
+    text: '输入要发送的内容：',
+    icon: 'glyphicon glyphicon-edit',
+    hide: false,
+    confirm: {
+      prompt: true
+    },
+    buttons: {
+      closer: false,
+      sticker: false
+    },
+    history: {
+      history: false
+    },
+    addclass: 'stack-modal',
+    stack: {
+      'dir1': 'down',
+      'dir2': 'right',
+      'modal': true
+    },
+    mobile: {
+      styling: false
+    }
+  }).get().on('pnotify.confirm', function(e, notice, val) {
+    if (val != "") {
+      obj.msg = val;
+      // 发送消息到服务端
+      socket.emit('private message', obj);
+    }
+  });
+};
+
+// 公告显示
+var showNotice = function(timestamp, content) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 获取公告内容
+  noticeContent = content;
+  // PNotify.prototype.options.styling = "bootstrap3";
+  var notice = new PNotify({
+    title: '公告',
+    text: noticeContent,
+    icon: 'glyphicon glyphicon-exclamation-sign',
+    hide: false,
+    buttons: {
+      closer: false,
+      sticker: false
+    },
+    history: {
+      history: false
+    },
+    addclass: 'stack-modal',
+    stack: {
+      'dir1': 'down',
+      'dir2': 'right',
+      'modal': true,
+      "overlay_close": true
+    },
+    mobile: {
+      styling: false
+    }
+  })
+  notice.get().click(function() {
+    notice.remove();
+  });
+};
+
+// 私聊提示
+var showPvMsg = function(timestamp, from, message) {
+  // 简化时间戳
+  var timestamp = getTimestamp(timestamp);
+  // 私聊框内容
+  // PNotify.prototype.options.styling = "bootstrap3";
+  new PNotify({
+    title: '来自 ' + from,
+    text: message + '<br><small>' + timestamp + '</small>',
+    icon: 'glyphicon glyphicon-comment',
+    type: 'info',
+    hide: false,
+    buttons: {
+      sticker: false
+    },
+    mobile: {
+      styling: false
+    },
+    addclass: 'chat-pnotify'
+  });
+};
+
+//操作结果提示
+var showResult = function(result) {
+  new PNotify({
+    text: result,
+    type: 'success',
+    buttons: {
+      sticker: false
+    },
+    mobile: {
+      styling: false
+    },
+    addclass: 'stack-modal'
+  });
+};
+
+// 简化时间戳
+var getTimestamp = function(timestamp) {
+  // 时间戳取"时：分"
+  timestamp = timestamp.substr(0, 5);
+  return timestamp;
+}
+
+// 侧边栏交互
+$('.sidebar-toggle').click(function() {
+  $('.chat-container').addClass('menu-open');
+  event.stopPropagation();
+});
+$('.chat-content').click(function() {
+  $('.chat-container').removeClass('menu-open');
+});
+
+// 自定义设置
+// “接收私聊”设置
+$('#recive-pv-msg').click(function() {
+  if ($(this).hasClass('switch-on')) {
+    $(this).removeClass('switch-on');
+    $(this).addClass('switch-off');
+  } else if ($(this).hasClass('switch-off')) {
+    $(this).removeClass('switch-off');
+    $(this).addClass('switch-on');
+  }
+})
+// “显示时间戳”设置
+$('#show-timestamp').click(function() {
+  if ($(this).hasClass('switch-on')) {
+    $(this).removeClass('switch-on');
+    $(this).addClass('switch-off');
+    $('.chat_window').addClass("timestamp-hidden");
+  } else if ($(this).hasClass('switch-off')) {
+    $(this).removeClass('switch-off');
+    $(this).addClass('switch-on');
+    $('.chat_window').removeClass("timestamp-hidden");
+  }
+})
+// “用户动态提示”设置
+$('#show-user-dvm').click(function() {
+  if ($(this).hasClass('switch-on')) {
+    $(this).removeClass('switch-on');
+    $(this).addClass('switch-off');
+    $('.chat_window').addClass("user-dvm-hidden");
+  } else if ($(this).hasClass('switch-off')) {
+    $(this).removeClass('switch-off');
+    $(this).addClass('switch-on');
+    $('.chat_window').removeClass("user-dvm-hidden");
+  }
+})
+// “显示IP”设置
+$('#show-ip').click(function() {
+  if ($(this).hasClass('switch-on')) {
+    $(this).removeClass('switch-on');
+    $(this).addClass('switch-off');
+    $('.chat_window').addClass("ip-hidden");
+  } else if ($(this).hasClass('switch-off')) {
+    $(this).removeClass('switch-off');
+    $(this).addClass('switch-on');
+    $('.chat_window').removeClass("ip-hidden");
+  }
+})
+// 地域聊天模式切换
+$('#map-chat-mode').click(function() {
+  if ($(this).hasClass('switch-on')) {
+    $(this).removeClass('switch-on');
+    $(this).addClass('switch-off');
+    $('.chat-content').removeClass("mapChat-on");
+  } else if ($(this).hasClass('switch-off')) {
+    $(this).removeClass('switch-off');
+    $(this).addClass('switch-on');
+    $('.chat-content').addClass("mapChat-on");
+  }
+})
+</script>
+<script>
+  // 地域聊天功能
+  var map = new BMap.Map("mapChat");map.setMapStyle({style:'midnight'});
+  var point = new BMap.Point(113.30764968, 23.3200491);
+  var p = {
+    lng: 0,
+    lat: 0
+  }
+  var marker = [];
+  // 设置地图主题
+  map.setMapStyle({style:'midnight'});
+  // 地图初始化焦点和放大倍数
+  map.centerAndZoom(point,12);
+  // 获取定位坐标
+  var geolocation = new BMap.Geolocation();
+  geolocation.getCurrentPosition(function(r){
+    p.lng = r.point.lng;
+    p.lat = r.point.lat;
+    if(this.getStatus() == BMAP_STATUS_SUCCESS){
+      // var mk = new BMap.Marker(r.point);
+      // map.addOverlay(mk);
+      map.panTo(r.point);
+      console.log('当前位置：'+r.point.lng+','+r.point.lat);
+      // 发送定位坐标到服务端
+      socket.emit("new position", username, r.point.lng, r.point.lat);
+    }
+    else {
+      console.log('failed'+this.getStatus());
+    }        
+  },{enableHighAccuracy: true})
+  // 开关控制
+  map.enableScrollWheelZoom();   //启用滚轮放大缩小，默认禁用
+  map.enableContinuousZoom();    //启用地图惯性拖拽，默认禁用
+  // 根据服务器返回结果，在地图上添加坐标
+  socket.on('add position', function(username, point_lng, point_lat) {
+    marker[username] = new BMap.Marker(new BMap.Point(point_lng, point_lat)); // 创建点
+    var label = new BMap.Label(username,{offset:new BMap.Size(20,-10)});
+    map.addOverlay(marker[username]);  //增加点
+    marker[username].setLabel(label);
+  })
+  //刷新坐标
+  socket.on('refresh position', function() {
+    // 清除所有坐标
+    map.clearOverlays();
+    // 重新发送定位坐标到服务端
+    socket.emit("new position", username, p.lng, p.lat);
+  })
+</script>
+</html>
