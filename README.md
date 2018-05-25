@@ -3,7 +3,7 @@
 ## 简介
 使用 Express + socket.io + MongoDB 搭建的轻量化聊天室
 
-## 开始部署
+## 开始
 ```
 git clone https://github.com/Eric-Cool/LitChat.git
 npm install
