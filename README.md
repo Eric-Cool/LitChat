@@ -1,17 +1,17 @@
-# LitChat
+# LiteChat
 
 ## 简介
 使用 Express + socket.io + MongoDB 搭建的轻量化聊天室
 
 ## 开始
 ```
-git clone https://github.com/Eric-Cool/LitChat.git
+git clone https://github.com/Eric-Cool/LiteChat.git
 npm install
 ```
 
 ## 运行
 ```
-cd LitChat
+cd LiteChat
 node .\bin\www
 ```
 
