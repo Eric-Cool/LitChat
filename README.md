@@ -31,4 +31,4 @@ node .\bin\www
 - [x] 公告功能
 
 ## 参考
-根据 https://github.com/Kongwsh/chatRoom 进行二次开发
+根据 https://github.com/Kongwsh/chatRoom 二次开发
