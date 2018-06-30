@@ -1,5 +1,8 @@
 # LiteChat
 
+## demo
+http://litechat.ericool.cn
+
 ## 简介
 使用 Express + socket.io + MongoDB 搭建的轻量化聊天室
 
